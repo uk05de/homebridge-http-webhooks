@@ -21,6 +21,7 @@ module.exports = function(homebridge) {
   homebridge.registerAccessory("homebridge-http-webhooks", "HttpWebHookOutlet", HttpWebHookOutletAccessory);
   homebridge.registerAccessory("homebridge-http-webhooks", "HttpWebHookSecurity", HttpWebHookSecurityAccessory);
   homebridge.registerAccessory("homebridge-http-webhooks", "HttpWebHookGarageDoorOpener", HttpWebHookGarageDoorOpenerAccessory);
+  homebridge.registerAccessory("homebridge-http-webhooks", "HttpWebHookBlindOpener", HttpWebHookBlindOpenerAccessory);
   homebridge.registerAccessory("homebridge-http-webhooks", "HttpWebHookStatelessSwitch", HttpWebHookStatelessSwitchAccessory);
   homebridge.registerAccessory("homebridge-http-webhooks", "HttpWebHookLockMechanism", HttpWebHookLockMechanismAccessory);
 };
@@ -37,6 +38,7 @@ function HttpWebHooksPlatform(log, config) {
   this.outlets = config["outlets"] || [];
   this.security = config["security"] || [];
   this.garageDoorOpeners = config["garagedooropeners"] || [];
+  this.blindOpeners = config["blindopeners"] || [];
   this.statelessSwitches = config["statelessswitches"] || [];
   this.lockMechanisms = config["lockmechanisms"] || [];
   this.httpAuthUser = config["http_auth_user"] || null;
@@ -89,6 +91,11 @@ HttpWebHooksPlatform.prototype = {
     for (var i = 0; i < this.garageDoorOpeners.length; i++) {
       var garageDoorOpenerAccessory = new HttpWebHookGarageDoorOpenerAccessory(this.log, this.garageDoorOpeners[i], this.storage);
       accessories.push(garageDoorOpenerAccessory);
+    }
+
+    for (var i = 0; i < this.blindOpeners.length; i++) {
+        var blindOpenerAccessory = new HttpWebHookBlindOpenerAccessory(this.log, this.blindOpeners[i], this.storage);
+        accessories.push(blindOpenerAccessory);
     }
 
     for (var i = 0; i < this.statelessSwitches.length; i++) {
@@ -221,6 +228,44 @@ HttpWebHooksPlatform.prototype = {
                   targetState : cachedTargetDoorState,
                   obstruction : cachedObstructionDetected                  
                 };
+              }
+              else if (accessory.type == "blindopener") {
+                  if (theUrlParams.currentblindstate != null) {
+                      var cachedCurrentBlindState = this.storage.getItemSync("http-webhook-current-blind-state-" + accessoryId);
+                      if (cachedCurrentBlindState === undefined) {
+                          cachedCurrentBlindState = Characteristic.CurrentBlindState.CLOSED;
+                      }
+                      this.storage.setItemSync("http-webhook-current-blind-state-" + accessoryId, theUrlParams.currentblindstate);
+                      if (cachedCurrentBlindState !== theUrlParams.currentblindstate) {
+                          accessory.changeCurrentBlindStateHandler(theUrlParams.currentblindstate);
+                      }
+                  }
+                  if (theUrlParams.targetblindstate != null) {
+                      var cachedTargetBlindState = this.storage.getItemSync("http-webhook-target-blind-state-" + accessoryId);
+                      if (cachedTargetBlindState === undefined) {
+                          cachedTargetBlindState = Characteristic.TargetBlindState.CLOSED;
+                      }
+                      this.storage.setItemSync("http-webhook-target-blind-state-" + accessoryId, theUrlParams.targetblindstate);
+                      if (cachedTargetBlindState !== theUrlParams.targetblindstate) {
+                          accessory.changeTargetBlindStateHandler(theUrlParams.targetblindstate);
+                      }
+                  }
+                  if (theUrlParams.obstructionblinddetected != null) {
+                      var cachedBlindObstructionDetected = this.storage.getItemSync("http-webhook-blind-obstruction-detected-" + accessoryId);
+                      if (cachedBlindObstructionDetected === undefined) {
+                          cachedBlindObstructionDetected = false;
+                      }
+                      this.storage.setItemSync("http-webhook-blind-obstruction-detected-" + accessoryId, theUrlParams.obstructionblinddetected);
+                      if (cachedBlindObstructionDetected !== theUrlParams.obstructionblinddetected) {
+                          accessory.changeBlindObstructionDetectedHandler(theUrlParams.obstructionblinddetected);
+                      }
+                  }
+                  responseBody = {
+                      success : true,
+                      currentState : cachedCurrentBlindState,
+                      targetState : cachedTargetBlindState,
+                      obstruction : cachedBlindObstructionDetected
+                  };
               }
               else if (accessory.type == "lockmechanism") {
                 if (theUrlParams.lockcurrentstate != null) {
@@ -940,103 +985,223 @@ HttpWebHookThermostatAccessory.prototype.getServices = function() {
 
 
 function HttpWebHookGarageDoorOpenerAccessory(log, garageDoorOpenerConfig, storage) {
-  this.log = log;
-  this.id = garageDoorOpenerConfig["id"];
-  this.name = garageDoorOpenerConfig["name"];
-  this.type = "garagedooropener";
-  this.setTargetDoorStateOpenURL = garageDoorOpenerConfig["open_url"] || "";
-  this.setTargetDoorStateOpenMethod = garageDoorOpenerConfig["open_method"] || "GET";  
-  this.setTargetDoorStateCloseURL = garageDoorOpenerConfig["close_url"] || "";
-  this.setTargetDoorStateCloseMethod = garageDoorOpenerConfig["close_method"] || "GET";  
-  this.storage = storage;
+    this.log = log;
+    this.id = garageDoorOpenerConfig["id"];
+    this.name = garageDoorOpenerConfig["name"];
+    this.type = "garagedooropener";
+    this.setTargetDoorStateOpenURL = garageDoorOpenerConfig["open_url"] || "";
+    this.setTargetDoorStateOpenMethod = garageDoorOpenerConfig["open_method"] || "GET";
+    this.setTargetDoorStateCloseURL = garageDoorOpenerConfig["close_url"] || "";
+    this.setTargetDoorStateCloseMethod = garageDoorOpenerConfig["close_method"] || "GET";
+    this.storage = storage;
 
-  this.service = new Service.GarageDoorOpener(this.name);
-  this.changeCurrentDoorStateHandler = (function(newState) {
-    if (newState) {
-      this.log("Change Current Door State for garage door opener to '%s'.", newState);
-      this.service.getCharacteristic(Characteristic.CurrentDoorState).updateValue(newState, undefined, CONTEXT_FROM_WEBHOOK);
-    }
-  }).bind(this);
-  this.changeTargetDoorStateHandler = (function(newState) {
-    if (newState) {
-      this.log("Change Target Door State for garage door opener to '%s'.", newState);
-      this.service.getCharacteristic(Characteristic.TargetDoorState).updateValue(newState, undefined, CONTEXT_FROM_WEBHOOK);
-    }
-  }).bind(this);
-  this.changeObstructionDetectedHandler = (function(newState) {
-    if (newState) {
-      this.log("Change Obstruction Detected for garage door opener to '%s'.", newState);
-      this.service.getCharacteristic(Characteristic.ObstructionDetected).updateValue(newState, undefined, CONTEXT_FROM_WEBHOOK);
-    }
-  }).bind(this);
+    this.service = new Service.GarageDoorOpener(this.name);
+    this.changeCurrentDoorStateHandler = (function(newState) {
+        if (newState) {
+            this.log("Change Current Door State for garage door opener to '%s'.", newState);
+            this.service.getCharacteristic(Characteristic.CurrentDoorState).updateValue(newState, undefined, CONTEXT_FROM_WEBHOOK);
+        }
+    }).bind(this);
+    this.changeTargetDoorStateHandler = (function(newState) {
+        if (newState) {
+            this.log("Change Target Door State for garage door opener to '%s'.", newState);
+            this.service.getCharacteristic(Characteristic.TargetDoorState).updateValue(newState, undefined, CONTEXT_FROM_WEBHOOK);
+        }
+    }).bind(this);
+    this.changeObstructionDetectedHandler = (function(newState) {
+        if (newState) {
+            this.log("Change Obstruction Detected for garage door opener to '%s'.", newState);
+            this.service.getCharacteristic(Characteristic.ObstructionDetected).updateValue(newState, undefined, CONTEXT_FROM_WEBHOOK);
+        }
+    }).bind(this);
 
-  this.service.getCharacteristic(Characteristic.TargetDoorState).on('get', this.getTargetDoorState.bind(this)).on('set', this.setTargetDoorState.bind(this));
-  this.service.getCharacteristic(Characteristic.CurrentDoorState).on('get', this.getCurrentDoorState.bind(this));
-  this.service.getCharacteristic(Characteristic.ObstructionDetected).on('get', this.getObstructionDetected.bind(this));
+    this.service.getCharacteristic(Characteristic.TargetDoorState).on('get', this.getTargetDoorState.bind(this)).on('set', this.setTargetDoorState.bind(this));
+    this.service.getCharacteristic(Characteristic.CurrentDoorState).on('get', this.getCurrentDoorState.bind(this));
+    this.service.getCharacteristic(Characteristic.ObstructionDetected).on('get', this.getObstructionDetected.bind(this));
 }
 
 // Target Door State
 HttpWebHookGarageDoorOpenerAccessory.prototype.getTargetDoorState = function(callback) {
-  this.log("Getting current Target Door State for '%s'...", this.id);
-  var state = this.storage.getItemSync("http-webhook-target-door-state-" + this.id);
-  if (state === undefined) {
-    state = Characteristic.TargetDoorState.CLOSED;
-  }
-  callback(null, state);
+    this.log("Getting current Target Door State for '%s'...", this.id);
+    var state = this.storage.getItemSync("http-webhook-target-door-state-" + this.id);
+    if (state === undefined) {
+        state = Characteristic.TargetDoorState.CLOSED;
+    }
+    callback(null, state);
 };
 
 HttpWebHookGarageDoorOpenerAccessory.prototype.setTargetDoorState = function(newState, callback, context) {
-  this.log("Target Door State for '%s'...", this.id);
-  this.storage.setItemSync("http-webhook-target-door-state-" + this.id, newState);
-  var urlToCall = this.setTargetDoorStateCloseURL;
-  var urlMethod = this.setTargetDoorStateCloseMethod;
-  if (newState == Characteristic.TargetDoorState.OPEN) {
-    var urlToCall = this.setTargetDoorStateOpenURL;
-    var urlMethod = this.setTargetDoorStateOpenMethod;
-  }
-  if (urlToCall !== "" && context !== CONTEXT_FROM_WEBHOOK) {
-    request({
-      method : urlMethod,
-      url : urlToCall,
-      timeout : DEFAULT_REQUEST_TIMEOUT
-    }, (function(err, response, body) {
-      var statusCode = response && response.statusCode ? response.statusCode : -1;
-      this.log("Request to '%s' finished with status code '%s' and body '%s'.", urlToCall, statusCode, body, err);
-      if (!err && statusCode == 200) {
+    this.log("Target Door State for '%s'...", this.id);
+    this.storage.setItemSync("http-webhook-target-door-state-" + this.id, newState);
+    var urlToCall = this.setTargetDoorStateCloseURL;
+    var urlMethod = this.setTargetDoorStateCloseMethod;
+    if (newState == Characteristic.TargetDoorState.OPEN) {
+        var urlToCall = this.setTargetDoorStateOpenURL;
+        var urlMethod = this.setTargetDoorStateOpenMethod;
+    }
+    if (urlToCall !== "" && context !== CONTEXT_FROM_WEBHOOK) {
+        request({
+            method : urlMethod,
+            url : urlToCall,
+            timeout : DEFAULT_REQUEST_TIMEOUT
+        }, (function(err, response, body) {
+            var statusCode = response && response.statusCode ? response.statusCode : -1;
+            this.log("Request to '%s' finished with status code '%s' and body '%s'.", urlToCall, statusCode, body, err);
+            if (!err && statusCode == 200) {
+                callback(null);
+            }
+            else {
+                callback(err || new Error("Request to '" + urlToCall + "' was not succesful."));
+            }
+        }).bind(this));
+    }
+    else {
         callback(null);
-      }
-      else {
-        callback(err || new Error("Request to '" + urlToCall + "' was not succesful."));
-      }
-    }).bind(this));
-  }
-  else {
-    callback(null);
-  }
+    }
 };
 
 // Current Door State
 HttpWebHookGarageDoorOpenerAccessory.prototype.getCurrentDoorState = function(callback) {
-  this.log("Getting Current Door State for '%s'...", this.id);
-  var state = this.storage.getItemSync("http-webhook-current-door-state-" + this.id);
-  if (state === undefined) {
-    state = Characteristic.CurrentDoorState.CLOSED;
-  }
-  callback(null, state);
+    this.log("Getting Current Door State for '%s'...", this.id);
+    var state = this.storage.getItemSync("http-webhook-current-door-state-" + this.id);
+    if (state === undefined) {
+        state = Characteristic.CurrentDoorState.CLOSED;
+    }
+    callback(null, state);
 };
 
 // Obstruction Detected
 HttpWebHookGarageDoorOpenerAccessory.prototype.getObstructionDetected = function(callback) {
-  this.log("Getting Obstruction Detected for '%s'...", this.id);
-  var state = this.storage.getItemSync("http-webhook-obstruction-detected-" + this.id);
-  if (state === undefined) {
-    state = false;
-  }
-  callback(null, state);
+    this.log("Getting Obstruction Detected for '%s'...", this.id);
+    var state = this.storage.getItemSync("http-webhook-obstruction-detected-" + this.id);
+    if (state === undefined) {
+        state = false;
+    }
+    callback(null, state);
 };
 
 HttpWebHookGarageDoorOpenerAccessory.prototype.getServices = function() {
-  return [ this.service ];
+    return [ this.service ];
+};
+
+// Target Door State
+HttpWebHookGarageDoorOpenerAccessory.prototype.getTargetDoorState = function(callback) {
+    this.log("Getting current Target Door State for '%s'...", this.id);
+    var state = this.storage.getItemSync("http-webhook-target-door-state-" + this.id);
+    if (state === undefined) {
+        state = Characteristic.TargetDoorState.CLOSED;
+    }
+    callback(null, state);
+};
+
+function HttpWebHookBlindOpenerAccessory(log, blindOpenerConfig, storage) {
+    this.log = log;
+    this.id = blindOpenerConfig["id"];
+    this.name = blindOpenerConfig["name"];
+    this.type = "blindopener";
+    this.setTargetBlindStateOpenURL = blindOpenerConfig["open_url"] || "";
+    this.setTargetBlindStateOpenMethod = blindOpenerConfig["open_method"] || "GET";
+    this.setTargetBlindStateCloseURL = blindOpenerConfig["close_url"] || "";
+    this.setTargetBlindStateCloseMethod = blindOpenerConfig["close_method"] || "GET";
+    this.storage = storage;
+
+    this.service = new Service.WindowCovering(this.name);
+    this.changeCurrentBlindStateHandler = (function(newState) {
+        if (newState) {
+            this.log("Change Current Blind State for blind opener to '%s'.", newState);
+            this.service.getCharacteristic(Characteristic.CurrentBlindState).updateValue(newState, undefined, CONTEXT_FROM_WEBHOOK);
+        }
+    }).bind(this);
+    this.changeTargetBlindStateHandler = (function(newState) {
+        if (newState) {
+            this.log("Change Target Blind State for blind opener to '%s'.", newState);
+            this.service.getCharacteristic(Characteristic.TargetBlindState).updateValue(newState, undefined, CONTEXT_FROM_WEBHOOK);
+        }
+    }).bind(this);
+    this.changeBlindObstructionDetectedHandler = (function(newState) {
+        if (newState) {
+            this.log("Change Blind Obstruction Detected for blind opener to '%s'.", newState);
+            this.service.getCharacteristic(Characteristic.ObstructionDetected).updateValue(newState, undefined, CONTEXT_FROM_WEBHOOK);
+        }
+    }).bind(this);
+
+    this.service.getCharacteristic(Characteristic.TargetBlindState).on('get', this.getTargetBlindState.bind(this)).on('set', this.setTargetBlindState.bind(this));
+    this.service.getCharacteristic(Characteristic.CurrentBlindState).on('get', this.getCurrentBlindState.bind(this));
+    this.service.getCharacteristic(Characteristic.ObstructionDetected).on('get', this.getBlindObstructionDetected.bind(this));
+}
+
+// Target Blind State
+HttpWebHookBlindOpenerAccessory.prototype.getTargetBlindState = function(callback) {
+    this.log("Getting current Target Blind State for '%s'...", this.id);
+    var state = this.storage.getItemSync("http-webhook-target-blind-state-" + this.id);
+    if (state === undefined) {
+        state = Characteristic.TargetBlindState.CLOSED;
+    }
+    callback(null, state);
+};
+
+HttpWebHookBlindOpenerAccessory.prototype.setTargetBlindState = function(newState, callback, context) {
+    this.log("Target Blind State for '%s'...", this.id);
+    this.storage.setItemSync("http-webhook-target-blind-state-" + this.id, newState);
+    var urlToCall = this.setTargetBlindStateCloseURL;
+    var urlMethod = this.setTargetBlindStateCloseMethod;
+    if (newState == Characteristic.TargetBlindState.OPEN) {
+        var urlToCall = this.setTargetBlindStateOpenURL;
+        var urlMethod = this.setTargetBlindStateOpenMethod;
+    }
+    if (urlToCall !== "" && context !== CONTEXT_FROM_WEBHOOK) {
+        request({
+            method : urlMethod,
+            url : urlToCall,
+            timeout : DEFAULT_REQUEST_TIMEOUT
+        }, (function(err, response, body) {
+            var statusCode = response && response.statusCode ? response.statusCode : -1;
+            this.log("Request to '%s' finished with status code '%s' and body '%s'.", urlToCall, statusCode, body, err);
+            if (!err && statusCode == 200) {
+                callback(null);
+            }
+            else {
+                callback(err || new Error("Request to '" + urlToCall + "' was not succesful."));
+            }
+        }).bind(this));
+    }
+    else {
+        callback(null);
+    }
+};
+
+// Current Blind State
+HttpWebHookBlindOpenerAccessory.prototype.getCurrentBlindState = function(callback) {
+    this.log("Getting Current Blind State for '%s'...", this.id);
+    var state = this.storage.getItemSync("http-webhook-current-blind-state-" + this.id);
+    if (state === undefined) {
+        state = Characteristic.CurrentBlindState.CLOSED;
+    }
+    callback(null, state);
+};
+
+// Obstruction Detected
+HttpWebHookBlindOpenerAccessory.prototype.getBlindObstructionDetected = function(callback) {
+    this.log("Getting Blind Obstruction Detected for '%s'...", this.id);
+    var state = this.storage.getItemSync("http-webhook-blind-obstruction-detected-" + this.id);
+    if (state === undefined) {
+        state = false;
+    }
+    callback(null, state);
+};
+
+HttpWebHookBlindOpenerAccessory.prototype.getServices = function() {
+    return [ this.service ];
+};
+
+// Target Blind State
+HttpWebHookBlindOpenerAccessory.prototype.getTargetBlindState = function(callback) {
+    this.log("Getting current Target Blind State for '%s'...", this.id);
+    var state = this.storage.getItemSync("http-webhook-target-blind-state-" + this.id);
+    if (state === undefined) {
+        state = Characteristic.TargetBlindState.CLOSED;
+    }
+    callback(null, state);
 };
 
 function HttpWebHookLockMechanismAccessory(log, lockMechanismOpenerConfig, storage) {
