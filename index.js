@@ -230,24 +230,24 @@ HttpWebHooksPlatform.prototype = {
                 };
               }
               else if (accessory.type == "blindopener") {
-                  if (theUrlParams.currentblindstate != null) {
+                  if (theUrlParams.CurrentPosition != null) {
                       var cachedCurrentBlindState = this.storage.getItemSync("http-webhook-current-blind-state-" + accessoryId);
                       if (cachedCurrentBlindState === undefined) {
-                          cachedCurrentBlindState = Characteristic.CurrentBlindState.CLOSED;
+                          cachedCurrentBlindState = 0;
                       }
-                      this.storage.setItemSync("http-webhook-current-blind-state-" + accessoryId, theUrlParams.currentblindstate);
-                      if (cachedCurrentBlindState !== theUrlParams.currentblindstate) {
-                          accessory.changeCurrentBlindStateHandler(theUrlParams.currentblindstate);
+                      this.storage.setItemSync("http-webhook-current-blind-state-" + accessoryId, theUrlParams.CurrentPosition);
+                      if (cachedCurrentBlindState !== theUrlParams.CurrentPosition) {
+                          accessory.changeCurrentPositionHandler(theUrlParams.CurrentPosition);
                       }
                   }
-                  if (theUrlParams.targetblindstate != null) {
-                      var cachedTargetBlindState = this.storage.getItemSync("http-webhook-target-blind-state-" + accessoryId);
-                      if (cachedTargetBlindState === undefined) {
-                          cachedTargetBlindState = Characteristic.TargetBlindState.CLOSED;
+                  if (theUrlParams.TargetPosition != null) {
+                      var cachedTargetPosition = this.storage.getItemSync("http-webhook-target-blind-state-" + accessoryId);
+                      if (cachedTargetPosition === undefined) {
+                          cachedTargetPosition = 0;
                       }
-                      this.storage.setItemSync("http-webhook-target-blind-state-" + accessoryId, theUrlParams.targetblindstate);
-                      if (cachedTargetBlindState !== theUrlParams.targetblindstate) {
-                          accessory.changeTargetBlindStateHandler(theUrlParams.targetblindstate);
+                      this.storage.setItemSync("http-webhook-target-blind-state-" + accessoryId, theUrlParams.TargetPosition);
+                      if (cachedTargetPosition !== theUrlParams.TargetPosition) {
+                          accessory.changeTargetPositionHandler(theUrlParams.TargetPosition);
                       }
                   }
                   if (theUrlParams.obstructionblinddetected != null) {
@@ -263,7 +263,7 @@ HttpWebHooksPlatform.prototype = {
                   responseBody = {
                       success : true,
                       currentState : cachedCurrentBlindState,
-                      targetState : cachedTargetBlindState,
+                      targetState : cachedTargetPosition,
                       obstruction : cachedBlindObstructionDetected
                   };
               }
@@ -1099,25 +1099,28 @@ function HttpWebHookBlindOpenerAccessory(log, blindOpenerConfig, storage) {
     this.id = blindOpenerConfig["id"];
     this.name = blindOpenerConfig["name"];
     this.type = "blindopener";
-    this.setTargetBlindStateOpenURL = blindOpenerConfig["open_url"] || "";
-    this.setTargetBlindStateOpenMethod = blindOpenerConfig["open_method"] || "GET";
-    this.setTargetBlindStateCloseURL = blindOpenerConfig["close_url"] || "";
-    this.setTargetBlindStateCloseMethod = blindOpenerConfig["close_method"] || "GET";
+    this.setTargetPositionOpenURL = blindOpenerConfig["open_url"] || "";
+    this.setTargetPositionOpenMethod = blindOpenerConfig["open_method"] || "GET";
+    this.setTargetPositionCloseURL = blindOpenerConfig["close_url"] || "";
+    this.setTargetPositionCloseMethod = blindOpenerConfig["close_method"] || "GET";
     this.storage = storage;
 
     this.service = new Service.WindowCovering(this.name);
-    this.changeCurrentBlindStateHandler = (function(newState) {
+
+    this.changeCurrentPositionHandler = (function(newState) {
         if (newState) {
             this.log("Change Current Blind State for blind opener to '%s'.", newState);
-            this.service.getCharacteristic(Characteristic.CurrentBlindState).updateValue(newState, undefined, CONTEXT_FROM_WEBHOOK);
+            this.service.getCharacteristic(Characteristic.CurrentPosition).updateValue(newState, undefined, CONTEXT_FROM_WEBHOOK);
         }
     }).bind(this);
-    this.changeTargetBlindStateHandler = (function(newState) {
+
+    this.changeTargetPositionHandler = (function(newState) {
         if (newState) {
             this.log("Change Target Blind State for blind opener to '%s'.", newState);
-            this.service.getCharacteristic(Characteristic.TargetBlindState).updateValue(newState, undefined, CONTEXT_FROM_WEBHOOK);
+            this.service.getCharacteristic(Characteristic.TargetPosition).updateValue(newState, undefined, CONTEXT_FROM_WEBHOOK);
         }
     }).bind(this);
+
     this.changeBlindObstructionDetectedHandler = (function(newState) {
         if (newState) {
             this.log("Change Blind Obstruction Detected for blind opener to '%s'.", newState);
@@ -1125,29 +1128,29 @@ function HttpWebHookBlindOpenerAccessory(log, blindOpenerConfig, storage) {
         }
     }).bind(this);
 
-    this.service.getCharacteristic(Characteristic.TargetBlindState).on('get', this.getTargetBlindState.bind(this)).on('set', this.setTargetBlindState.bind(this));
-    this.service.getCharacteristic(Characteristic.CurrentBlindState).on('get', this.getCurrentBlindState.bind(this));
+    this.service.getCharacteristic(Characteristic.TargetPosition).on('get', this.getTargetPosition.bind(this)).on('set', this.setTargetPosition.bind(this));
+    this.service.getCharacteristic(Characteristic.CurrentPosition).on('get', this.getCurrentPosition.bind(this));
     this.service.getCharacteristic(Characteristic.ObstructionDetected).on('get', this.getBlindObstructionDetected.bind(this));
 }
 
 // Target Blind State
-HttpWebHookBlindOpenerAccessory.prototype.getTargetBlindState = function(callback) {
+HttpWebHookBlindOpenerAccessory.prototype.getTargetPosition = function(callback) {
     this.log("Getting current Target Blind State for '%s'...", this.id);
     var state = this.storage.getItemSync("http-webhook-target-blind-state-" + this.id);
     if (state === undefined) {
-        state = Characteristic.TargetBlindState.CLOSED;
+        state = Characteristic.TargetPosition.CLOSED;
     }
     callback(null, state);
 };
 
-HttpWebHookBlindOpenerAccessory.prototype.setTargetBlindState = function(newState, callback, context) {
+HttpWebHookBlindOpenerAccessory.prototype.setTargetPosition = function(newState, callback, context) {
     this.log("Target Blind State for '%s'...", this.id);
     this.storage.setItemSync("http-webhook-target-blind-state-" + this.id, newState);
-    var urlToCall = this.setTargetBlindStateCloseURL;
-    var urlMethod = this.setTargetBlindStateCloseMethod;
-    if (newState == Characteristic.TargetBlindState.OPEN) {
-        var urlToCall = this.setTargetBlindStateOpenURL;
-        var urlMethod = this.setTargetBlindStateOpenMethod;
+    var urlToCall = this.setTargetPositionCloseURL;
+    var urlMethod = this.setTargetPositionCloseMethod;
+    if (newState > 0) {
+        var urlToCall = this.setTargetPositionOpenURL;
+        var urlMethod = this.setTargetPositionOpenMethod;
     }
     if (urlToCall !== "" && context !== CONTEXT_FROM_WEBHOOK) {
         request({
@@ -1171,11 +1174,11 @@ HttpWebHookBlindOpenerAccessory.prototype.setTargetBlindState = function(newStat
 };
 
 // Current Blind State
-HttpWebHookBlindOpenerAccessory.prototype.getCurrentBlindState = function(callback) {
+HttpWebHookBlindOpenerAccessory.prototype.getCurrentPosition = function(callback) {
     this.log("Getting Current Blind State for '%s'...", this.id);
     var state = this.storage.getItemSync("http-webhook-current-blind-state-" + this.id);
     if (state === undefined) {
-        state = Characteristic.CurrentBlindState.CLOSED;
+        state = 0;
     }
     callback(null, state);
 };
@@ -1195,11 +1198,11 @@ HttpWebHookBlindOpenerAccessory.prototype.getServices = function() {
 };
 
 // Target Blind State
-HttpWebHookBlindOpenerAccessory.prototype.getTargetBlindState = function(callback) {
+HttpWebHookBlindOpenerAccessory.prototype.getTargetPosition = function(callback) {
     this.log("Getting current Target Blind State for '%s'...", this.id);
     var state = this.storage.getItemSync("http-webhook-target-blind-state-" + this.id);
     if (state === undefined) {
-        state = Characteristic.TargetBlindState.CLOSED;
+        state = 0;
     }
     callback(null, state);
 };
